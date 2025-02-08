@@ -1,0 +1,92 @@
+[gd_scene load_steps=8 format=3 uid="uid://slnsc6ttekac"]
+
+[ext_resource type="Script" path="res://player.gd" id="1_8p4k3"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_4ixv3"]
+height = 1.7
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_scanner"]
+transparency = 1
+albedo_color = Color(1, 0, 0, 0.5)
+
+[sub_resource type="Environment" id="Environment_kpno0"]
+background_mode = 1
+ssao_enabled = true
+ssao_intensity = 0.8
+glow_enabled = true
+adjustment_enabled = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_xtw4r"]
+albedo_color = Color(0.2, 0.2, 0.2, 1)
+metallic = 0.3
+roughness = 0.7
+emission_enabled = true
+emission = Color(0.0784314, 0.0784314, 0.0784314, 1)
+emission_energy_multiplier = 0.2
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_8ykpv"]
+size = Vector2(50, 50)
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_8yl2p"]
+
+[node name="Node3D" type="Node3D"]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 10, 0)
+shadow_enabled = true
+
+[node name="Player" type="CharacterBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8, 0)
+script = ExtResource("1_8p4k3")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.9, 0)
+shape = SubResource("CapsuleShape3D_4ixv3")
+
+[node name="Head" type="Node3D" parent="Player"]
+
+[node name="Camera3D" type="Camera3D" parent="Player/Head"]
+current = true
+fov = 90.0
+
+[node name="SubViewport" type="SubViewport" parent="Player/Head"]
+transparent_bg = true
+use_hdr_2d = true
+size = Vector2i(1280, 720)
+render_target_update_mode = 4
+
+[node name="Camera3D" type="Camera3D" parent="Player/Head/SubViewport"]
+fov = 90.0
+
+[node name="Scanner" type="Node3D" parent="Player/Head"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.154, -0.234, -0.338)
+
+[node name="Lines" type="ImmediateGeometry3D" parent="Player/Head/Scanner"]
+_import_path = NodePath("")
+unique_name_in_owner = false
+process_mode = 0
+process_priority = 0
+process_physics_priority = 0
+process_thread_group = 0
+physics_interpolation_mode = 0
+auto_translate_mode = 0
+editor_description = ""
+material_override = SubResource("StandardMaterial3D_scanner")
+cast_shadow = 0
+script = null
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_kpno0")
+
+[node name="Level" type="Node3D" parent="."]
+
+[node name="Ground" type="StaticBody3D" parent="Level"]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Level/Ground"]
+material_override = SubResource("StandardMaterial3D_xtw4r")
+mesh = SubResource("PlaneMesh_8ykpv")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Level/Ground"]
+shape = SubResource("WorldBoundaryShape3D_8yl2p")
+
+[node name="Objects" type="Node3D" parent="."]
