@@ -1,10 +1,23 @@
 [gd_resource type="StandardMaterial3D" format=3 uid="uid://oam4cb06utes"]
 
 [resource]
-transparency = 1
+transparency = 2
+alpha_scissor_threshold = 0.98
 shading_mode = 0
 vertex_color_use_as_albedo = true
-albedo_color = Color(1, 0, 0, 0.8)
-billboard_mode = 1
+albedo_color = Color(1, 0, 0, 1.0)
+emission_enabled = true
+emission = Color(1, 0, 0, 1)
+emission_energy_multiplier = 3.0
+billboard_mode = 3
 billboard_keep_scale = true
-point_size = 2.0
+use_particle_trails = false
+fixed_size = true
+point_size = 1.5
+use_point_size = true
+disable_ambient_light = true
+disable_receive_shadows = true
+disable_fog = true
+particles_anim_h_frames = 1
+particles_anim_v_frames = 1
+particles_anim_loop = false

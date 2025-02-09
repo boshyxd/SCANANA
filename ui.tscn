@@ -1,6 +1,76 @@
-[gd_scene load_steps=2 format=3 uid="uid://b4c1y6kj8h0"]
+[gd_scene load_steps=9 format=3 uid="uid://b4c1y6kj8h0"]
 
 [ext_resource type="Script" path="res://ui.gd" id="1_ui"]
+[ext_resource type="Shader" path="res://glitch_effect.gdshader" id="2_glitch"]
+[ext_resource type="Shader" path="res://progress_bar.gdshader" id="3_progress"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_glitch"]
+shader = ExtResource("2_glitch")
+shader_parameter/glitch_intensity = 0.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.1, 0.1, 0.1, 0.7)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.3, 0.3, 0.3, 0.4)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+shadow_color = Color(0, 0, 0, 0.3)
+shadow_size = 8
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_terrain_progress"]
+shader = ExtResource("3_progress")
+shader_parameter/progress = 0.0
+shader_parameter/background_color = Color(0.1, 0.1, 0.1, 0.6)
+shader_parameter/foreground_color = Color(0, 0.8, 0, 0.8)
+shader_parameter/wave_amplitude = 0.02
+shader_parameter/wave_frequency = 3.0
+shader_parameter/wave_speed = 1.5
+shader_parameter/glow_intensity = 0.5
+shader_parameter/particle_speed = 0.05
+shader_parameter/particle_lifetime = 3.0
+shader_parameter/particle_softness = 0.01
+shader_parameter/particle_spacing = 0.1
+shader_parameter/particle_offset = Vector2(0, 0)
+shader_parameter/particle_start_scale = Vector2(0.02, 0.02)
+shader_parameter/particle_end_scale = Vector2(0.01, 0.01)
+shader_parameter/particle_scale_randomness = 0.5
+shader_parameter/particle_amount = 20
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_banana_progress"]
+shader = ExtResource("3_progress")
+shader_parameter/progress = 0.0
+shader_parameter/background_color = Color(0.1, 0.1, 0.1, 0.6)
+shader_parameter/foreground_color = Color(1, 0.5, 0, 0.8)
+shader_parameter/wave_amplitude = 0.02
+shader_parameter/wave_frequency = 4.0
+shader_parameter/wave_speed = 2.0
+shader_parameter/glow_intensity = 0.7
+shader_parameter/particle_speed = 0.08
+shader_parameter/particle_lifetime = 2.0
+shader_parameter/particle_softness = 0.01
+shader_parameter/particle_spacing = 0.08
+shader_parameter/particle_offset = Vector2(0, 0)
+shader_parameter/particle_start_scale = Vector2(0.02, 0.02)
+shader_parameter/particle_end_scale = Vector2(0.01, 0.01)
+shader_parameter/particle_scale_randomness = 0.5
+shader_parameter/particle_amount = 25
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_tutorial_button"]
+bg_color = Color(0.2, 0.2, 0.2, 0.8)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.3, 0.3, 0.3, 0.4)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
 
 [node name="UI" type="Control"]
 layout_mode = 3
@@ -11,53 +81,218 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_ui")
 
-[node name="Controls" type="VBoxContainer" parent="."]
+[node name="GlitchOverlay" type="ColorRect" parent="."]
+material = SubResource("ShaderMaterial_glitch")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ControlsPanel" type="PanelContainer" parent="."]
 layout_mode = 1
 anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 20.0
-offset_top = -120.0
-offset_right = 300.0
+offset_top = -180.0
+offset_right = 320.0
 offset_bottom = -20.0
 grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 
-[node name="Title" type="Label" parent="Controls"]
+[node name="Controls" type="VBoxContainer" parent="ControlsPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="ControlsPanel/Controls"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_font_sizes/font_size = 20
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.5)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 24
 text = "Controls:"
 
-[node name="ControlsList" type="Label" parent="Controls"]
+[node name="ControlsList" type="Label" parent="ControlsPanel/Controls"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.3)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 18
 text = "WASD - Move
 Space - Jump
 Left Click - Scan
 1-4 - Change Scan Mode
 Esc - Toggle Mouse"
 
-[node name="Mode" type="VBoxContainer" parent="."]
+[node name="ModePanel" type="PanelContainer" parent="."]
 layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -200.0
+offset_left = -220.0
 offset_top = 20.0
 offset_right = -20.0
 offset_bottom = 120.0
 grow_horizontal = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 
-[node name="Title" type="Label" parent="Mode"]
+[node name="Mode" type="VBoxContainer" parent="ModePanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="ModePanel/Mode"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-theme_override_font_sizes/font_size = 20
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.5)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 24
 text = "Current Mode:"
 horizontal_alignment = 2
 
-[node name="CurrentMode" type="Label" parent="Mode"]
+[node name="CurrentMode" type="Label" parent="ModePanel/Mode"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0.8, 0, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.5)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 32
+text = "CONE"
+horizontal_alignment = 2
+
+[node name="ProgressPanel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -250.0
+offset_top = 20.0
+offset_right = 250.0
+offset_bottom = 160.0
+grow_horizontal = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="Progress" type="VBoxContainer" parent="ProgressPanel"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="TerrainProgress" type="VBoxContainer" parent="ProgressPanel/Progress"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="Label" type="Label" parent="ProgressPanel/Progress/TerrainProgress"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.5)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 20
+text = "Terrain Scanned: 0%"
+horizontal_alignment = 1
+
+[node name="ProgressBar" type="ColorRect" parent="ProgressPanel/Progress/TerrainProgress"]
+material = SubResource("ShaderMaterial_terrain_progress")
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+
+[node name="BananaWarning" type="VBoxContainer" parent="ProgressPanel/Progress"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="Label" type="Label" parent="ProgressPanel/Progress/BananaWarning"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.5, 0, 1)
+theme_override_colors/font_outline_color = Color(0.2, 0.1, 0, 0.5)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 20
+text = "Banana Detection: 0%"
+horizontal_alignment = 1
+
+[node name="ProgressBar" type="ColorRect" parent="ProgressPanel/Progress/BananaWarning"]
+material = SubResource("ShaderMaterial_banana_progress")
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+
+[node name="TutorialOverlay" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.7)
+
+[node name="CenterContainer" type="CenterContainer" parent="TutorialOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="TutorialOverlay/CenterContainer"]
+custom_minimum_size = Vector2(600, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="TutorialOverlay/CenterContainer/PanelContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Title" type="Label" parent="TutorialOverlay/CenterContainer/PanelContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0.8, 0, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.5)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 32
+text = "How to Play"
+horizontal_alignment = 1
+
+[node name="Instructions" type="Label" parent="TutorialOverlay/CenterContainer/PanelContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.3)
+theme_override_constants/outline_size = 2
+theme_override_font_sizes/font_size = 20
+text = "Welcome to SCANANA!
+
+Your LIDAR scanner is malfunctioning in a peculiar way...
+It has developed a severe allergy to bananas!
+
+MISSION:
+Scan and analyze the terrain, but whatever you do, 
+DO NOT scan the banana or your system will crash!
+
+CONTROLS:
+• WASD - Move around the environment
+• SPACE - Jump
+• Left Click - Activate LIDAR scanner
+• Keys 1-4 - Switch scan modes:
+   CONE - Forward directional scan
+   SPHERE - 360° area scan
+   PLANE - Horizontal slice scan
+   CUBE - Large volume scan
+
+OBJECTIVES:
+• Scan 80% of the terrain to complete your mission
+• AVOID scanning the banana - it will corrupt your system!
+• If banana detection reaches 50%, your scanner will malfunction
+• At 100% banana detection, total system failure (BSOD)
+
+Press ESC to toggle mouse cursor.
+
+WARNING: Your scanner's banana detection is PERMANENT 
+and cannot be reset. Scan carefully!"
+horizontal_alignment = 1
+
+[node name="OkButton" type="Button" parent="TutorialOverlay/CenterContainer/PanelContainer/VBoxContainer"]
+custom_minimum_size = Vector2(200, 50)
+layout_mode = 2
+size_flags_horizontal = 4
+focus_mode = 0
+theme_override_colors/font_hover_color = Color(0, 0.8, 0, 1)
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
 theme_override_font_sizes/font_size = 24
-text = "CONE"
-horizontal_alignment = 2 
+theme_override_styles/hover = SubResource("StyleBoxFlat_tutorial_button")
+theme_override_styles/normal = SubResource("StyleBoxFlat_tutorial_button")
+text = "OK, Got it!"

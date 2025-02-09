@@ -1,0 +1,101 @@
+[gd_scene load_steps=3 format=3 uid="uid://b8xkj6kj8h0"]
+
+[ext_resource type="Script" path="res://game_over.gd" id="1_game_over"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button"]
+bg_color = Color(0.1, 0.1, 0.1, 0.8)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 1, 1, 0.4)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="GameOver" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_game_over")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0.5, 1)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -400.0
+offset_top = -200.0
+offset_right = 400.0
+offset_bottom = 200.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 30
+
+[node name="ErrorTitle" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_constants/line_spacing = 12
+theme_override_font_sizes/font_size = 64
+text = ":( SCANNER_MALFUNCTION"
+horizontal_alignment = 1
+
+[node name="ErrorCode" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_constants/line_spacing = 8
+theme_override_font_sizes/font_size = 24
+text = "Error Code: BANANA_OVERFLOW_EXCEPTION_0x000000BA"
+horizontal_alignment = 1
+
+[node name="ErrorDetails" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_constants/line_spacing = 8
+theme_override_font_sizes/font_size = 20
+text = "A critical error has occurred in the LIDAR scanning system.
+The scanner has detected excessive banana presence in the environment.
+
+What happened:
+The scanning system encountered a fatal error due to banana overexposure.
+To protect the system from further corruption, the scan has been terminated.
+
+Technical Details:
+- SCANNER_PROCESS_TERMINATED
+- BANANA_DETECTION_LEVEL_CRITICAL
+- SYSTEM_INTEGRITY_COMPROMISED
+- NO_RECOVERY_POSSIBLE
+
+* Press any key or click the button below to restart the scanning process"
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="VBoxContainer"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+
+[node name="RestartButton" type="Button" parent="VBoxContainer"]
+custom_minimum_size = Vector2(200, 50)
+layout_mode = 2
+size_flags_horizontal = 4
+focus_mode = 0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_hover_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleBoxFlat_button")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button")
+text = "Restart Scanner" 

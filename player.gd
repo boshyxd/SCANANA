@@ -8,38 +8,38 @@ extends CharacterBody3D
 @onready var scan_lines = $Head/Scanner/Lines
 @onready var ui = $"../UI"
 
-@export var speed = 14.0
-@export var fall_acceleration = 75.0
+@export var speed = 7.0
+@export var fall_acceleration = 30.0
 @export var mouse_sensitivity = 0.2
 
 @export var scan_radius = 30.0
-@export var scan_angle = 45.0
-@export var rays_per_scan = 32
+@export var scan_angle = 30.0
+@export var rays_per_scan = 16
 @export var point_size = 0.02
-@export var close_distance = 5.0  # Distance for red color
-@export var mid_distance = 15.0   # Distance for yellow color
-@export var far_distance = 30.0   # Distance for blue color
+@export var close_distance = 5.0
+@export var mid_distance = 15.0
+@export var far_distance = 30.0
+@export var grid_size = 5.0
 
-# Quality Settings
 enum Quality { LOW, MEDIUM, HIGH }
 @export var quality_level: Quality = Quality.MEDIUM
-@export var color_update_interval = 0.2  # Reduced update frequency
+@export var color_update_interval = 0.2
 
 var quality_settings = {
 	Quality.LOW: {
 		"points_per_frame": 32,
 		"fullscreen_step": 20,
-		"max_points": 5000
+		"max_points": 20000
 	},
 	Quality.MEDIUM: {
 		"points_per_frame": 64,
 		"fullscreen_step": 10,
-		"max_points": 10000
+		"max_points": 50000
 	},
 	Quality.HIGH: {
 		"points_per_frame": 128,
 		"fullscreen_step": 5,
-		"max_points": 20000
+		"max_points": 100000
 	}
 }
 
@@ -57,45 +57,57 @@ var target_velocity = Vector3.ZERO
 var scanning = false
 var rng = RandomNumberGenerator.new()
 var scan_container: Node3D
-var current_pool_size = 0  # Track how many points we've created
-var scan_progress = 0.0  # Track scan progress for sweeping effect
-var is_single_scan = false  # Track if we're doing a single sweep scan
+var current_pool_size = 0
+var scan_progress = 0.0
+var is_single_scan = false
 var color_update_timer = 0.0
-var scan_points = []  # Store point references
-var base_material: StandardMaterial3D  # Reusable material
+var scan_points = []
+var base_material: StandardMaterial3D
+var glitch_material: ShaderMaterial
+var banana_scan_points = []
+var max_scannable_cells = 0
+var scanned_positions = {}
+var terrain_scanned = 0.0
+var terrain_progress_bar: TextureProgressBar
 
 func _ready():
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	scan_camera.transform = camera.transform
 	rng.randomize()
 	
-	# Create scan container
+	floor_max_angle = deg_to_rad(60)
+	floor_snap_length = 0.3
+	floor_block_on_wall = false
+	floor_constant_speed = true
+	
 	scan_container = Node3D.new()
 	scan_container.name = "ScanPoints"
 	call_deferred("add_scan_container")
 	
-	# Create reusable material
-	base_material = StandardMaterial3D.new()
-	base_material.emission_enabled = true
-	base_material.emission_energy = 2.0
-	base_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glitch_material = ShaderMaterial.new()
+	glitch_material.shader = load("res://glitch_particle.gdshader")
+	glitch_material.set_shader_parameter("glitch_intensity", 0.5)
+	glitch_material.set_shader_parameter("base_color", Color(1.0, 0.2, 0.0, 1.0))
+	glitch_material.set_shader_parameter("time_offset", rng.randf() * 100.0)
 	
 	update_mode_display()
 	
-	# Hide all environment objects in game
-	var level = get_node("../Level")
+	await get_tree().create_timer(0.1).timeout
+	calculate_max_scannable_cells()
+	
+	var level = get_node("../WorldEnvironment")
 	if level:
 		_set_objects_visibility(level, false)
 
 func add_scan_container():
 	get_tree().root.add_child(scan_container)
 
-func _set_objects_visibility(node: Node, is_visible: bool):
+func _set_objects_visibility(node: Node, should_be_visible: bool):
 	if node is MeshInstance3D:
-		node.visible = is_visible
+		node.visible = should_be_visible
 	
 	for child in node.get_children():
-		_set_objects_visibility(child, is_visible)
+		_set_objects_visibility(child, should_be_visible)
 
 func update_mode_display():
 	if ui:
@@ -164,20 +176,23 @@ func _physics_process(delta):
 	else:
 		target_velocity.y = 0
 		if Input.is_action_just_pressed("player_jump"):
-			target_velocity.y = 10.0
+			target_velocity.y = 12.0
+	
+	var snap_vector = Vector3.DOWN * floor_snap_length if is_on_floor() and not Input.is_action_just_pressed("player_jump") else Vector3.ZERO
 	
 	velocity = target_velocity
+	
 	move_and_slide()
 
 func start_scan():
 	scanning = true
 	scan_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	scan_progress = 0.0  # Reset progress
+	scan_progress = 0.0
 	is_single_scan = current_mode == ScanMode.FULLSCREEN
 	perform_scan()
 
 func stop_scan():
-	if !is_single_scan:  # Only stop if not doing a single sweep scan
+	if !is_single_scan:
 		scanning = false
 		scan_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
@@ -196,7 +211,7 @@ func perform_scan():
 			perform_fullscreen_scan(space_state, scan_origin)
 
 func perform_cone_scan(space_state, scan_origin):
-	for _i in rays_per_scan:
+	for _i in rays_per_scan * 2:
 		var phi = rng.randf_range(-scan_angle, scan_angle)
 		var theta = rng.randf_range(-scan_angle, scan_angle)
 		
@@ -208,9 +223,9 @@ func perform_cone_scan(space_state, scan_origin):
 		cast_ray(space_state, scan_origin, ray_direction)
 
 func perform_line_scan(space_state, scan_origin):
-	for i in rays_per_scan:
+	for i in rays_per_scan * 2:
 		var theta = rng.randf_range(-line_width/2.0, line_width/2.0)
-		var vertical_angle = (float(i) - float(rays_per_scan)/2.0) * (scan_angle*2.0/float(rays_per_scan))
+		var vertical_angle = (float(i) - float(rays_per_scan)) * (scan_angle*2.0/float(rays_per_scan))
 		
 		var ray_direction = Vector3(
 			sin(deg_to_rad(theta)),
@@ -220,8 +235,8 @@ func perform_line_scan(space_state, scan_origin):
 		cast_ray(space_state, scan_origin, ray_direction)
 
 func perform_wide_scan(space_state, scan_origin):
-	for i in rays_per_scan:
-		var phi = (float(i) - float(rays_per_scan)/2.0) * (scan_angle*2.0/float(rays_per_scan))
+	for i in rays_per_scan * 2:
+		var phi = (float(i) - float(rays_per_scan)) * (scan_angle*2.0/float(rays_per_scan))
 		var theta = rng.randf_range(-wide_height/2.0, wide_height/2.0)
 		
 		var ray_direction = Vector3(
@@ -232,107 +247,142 @@ func perform_wide_scan(space_state, scan_origin):
 		cast_ray(space_state, scan_origin, ray_direction)
 
 func perform_fullscreen_scan(space_state, scan_origin):
-	var screen_size = get_viewport().get_visible_rect().size
+	var fov = 90.0
+	var points_per_line = 128
 	
-	# Use quality-based pixel step
-	var pixel_step = quality_settings[quality_level]["fullscreen_step"]
-	var cols = int(screen_size.x / pixel_step)
-	var total_rows = int(screen_size.y / pixel_step)
+	var vertical_angle = lerp(-fov/2.0, fov/2.0, scan_progress)
 	
-	var current_row = int(scan_progress * total_rows)
-	scan_progress += 0.05
-	
-	if scan_progress >= 1.0:
-		scanning = false
-		scan_progress = 0.0
-		return
-	
-	for col in cols:
-		var x = (float(col) / float(cols - 1)) * screen_size.x - (screen_size.x / 2)
-		var y = (float(current_row) / float(total_rows - 1)) * screen_size.y - (screen_size.y / 2)
+	for i in points_per_line:
+		var horizontal_angle = lerp(-fov/2.0, fov/2.0, float(i) / float(points_per_line - 1))
 		
-		var ray_direction = -scanner.global_transform.basis.z
-		var ray_origin = scan_origin + scanner.global_transform.basis.x * (x / screen_size.x * 2.0) + scanner.global_transform.basis.y * (y / screen_size.y * 2.0)
+		var ray_direction = Vector3(
+			sin(deg_to_rad(horizontal_angle)),
+			sin(deg_to_rad(vertical_angle)),
+			-cos(deg_to_rad(horizontal_angle)) * cos(deg_to_rad(vertical_angle))
+		).normalized()
 		
-		var query = PhysicsRayQueryParameters3D.create(ray_origin, ray_origin + ray_direction * scan_radius)
+		ray_direction = scanner.global_transform.basis * ray_direction
+		
+		var query = PhysicsRayQueryParameters3D.create(scan_origin, scan_origin + ray_direction * scan_radius)
 		query.collide_with_areas = true
 		query.collide_with_bodies = true
-		query.collision_mask = 0xFFFFFFFF  # Collide with all layers
+		query.collision_mask = 0xFFFFFFFF
 		
 		var result = space_state.intersect_ray(query)
 		if result:
-			create_scan_point(result.position)
+			var collider = result.collider
+			var is_banana = collider.name == "Banana" or collider.get_parent().name == "Banana"
+			var is_terrain = collider.get_collision_layer_value(2)
+			create_scan_point(result.position, is_banana)
+			update_scan_progress(is_terrain, is_banana, result.position)
+	
+	scan_progress += 0.03
+	if scan_progress >= 1.0:
+		scanning = false
+		scan_progress = 0.0
 
 func cast_ray(space_state, scan_origin, ray_direction):
 	ray_direction = scanner.global_transform.basis * ray_direction
 	var query = PhysicsRayQueryParameters3D.create(scan_origin, scan_origin + ray_direction * scan_radius)
 	query.collide_with_areas = true
 	query.collide_with_bodies = true
-	query.collision_mask = 0xFFFFFFFF  # Collide with all layers
+	query.collision_mask = 0xFFFFFFFF
 	
 	var result = space_state.intersect_ray(query)
 	if result:
-		create_scan_point(result.position)
+		var collider = result.collider
+		var is_banana = collider.name == "Banana" or collider.get_parent().name == "Banana"
+		var is_terrain = collider.get_collision_layer_value(2)
+		
+		create_scan_point(result.position, is_banana)
+		update_scan_progress(is_terrain, is_banana, result.position)
 
-func create_scan_point(pos: Vector3):
+func create_scan_point(pos: Vector3, is_banana: bool = false):
 	if current_pool_size >= quality_settings[quality_level]["max_points"]:
-		# Remove oldest point if we're at max capacity
 		if scan_points.size() > 0:
 			var oldest_point = scan_points.pop_front()
 			oldest_point.point.queue_free()
 			current_pool_size -= 1
 	
-	var point = CSGSphere3D.new()
-	point.radius = point_size
+	var point = MeshInstance3D.new()
+	var mesh = SphereMesh.new()
 	
-	# Use the base material instance
-	var material = base_material.duplicate()
+	if is_banana:
+		mesh.radius = 0.04
+		mesh.height = 0.08
+		mesh.radial_segments = 8
+		mesh.rings = 4
+		
+		var unique_material = glitch_material.duplicate()
+		unique_material.set_shader_parameter("time_offset", rng.randf() * 100.0)
+		point.material_override = unique_material
+		
+		banana_scan_points.push_back({
+			"point": point,
+			"material": unique_material,
+			"position": pos,
+			"creation_time": Time.get_ticks_msec() / 1000.0
+		})
+	else:
+		mesh.radius = 0.02
+		mesh.height = 0.04
+		mesh.radial_segments = 4
+		mesh.rings = 2
+		
+		var distance = global_position.distance_to(pos)
+		var color = get_distance_color(distance)
+		
+		var material = StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.albedo_color = color
+		material.emission_enabled = true
+		material.emission = color
+		material.emission_energy_multiplier = 3.0 + (1.0 - distance / far_distance) * 2.0
+		material.disable_ambient_light = true
+		material.disable_receive_shadows = true
+		material.disable_fog = true
+		point.material_override = material
+		
+		scan_points.push_back({
+			"point": point,
+			"material": material,
+			"position": pos
+		})
 	
-	# Calculate initial color based on distance
-	var distance = global_position.distance_to(pos)
-	var color = get_distance_color(distance)
-	material.albedo_color = color
-	material.emission = color
-	
-	point.material = material
+	point.mesh = mesh
 	scan_container.add_child(point)
 	point.global_position = pos
-	
-	# Store point reference for updating
-	scan_points.push_back({"point": point, "material": material, "position": pos})
 	
 	current_pool_size += 1
 
 func get_distance_color(distance: float) -> Color:
 	if distance <= close_distance:
-		return Color(1.0, 0.0, 0.0, 1.0)  # Red
+		return Color(1.0, 0.0, 0.0, 1.0)
 	elif distance <= mid_distance:
 		var t = (distance - close_distance) / (mid_distance - close_distance)
-		return Color(1.0, t, 0.0, 1.0)  # Red to Yellow
+		return Color(1.0, t, 0.0, 1.0)
 	elif distance <= far_distance:
 		var t = (distance - mid_distance) / (far_distance - mid_distance)
-		return Color(1.0 - t, 1.0 - t, t, 1.0)  # Yellow to Blue
+		return Color(1.0 - t, 1.0 - t, t, 1.0)
 	else:
-		return Color(0.0, 0.0, 1.0, 1.0)  # Blue
+		return Color(0.0, 0.0, 1.0, 1.0)
 
 func _process(delta):
 	if scanning:
 		perform_scan()
 	
-	# Update colors every frame for smoother transitions
 	update_point_colors()
+	
+	update_banana_particles(delta)
 
 func update_point_colors():
-	# Skip if no points to update
 	if scan_points.size() == 0:
 		return
 		
-	# Update all points every frame, but in chunks to spread the load
-	var chunk_size = 200  # Process more points per frame
+	var chunk_size = 200
 	var total_chunks = max(1, (scan_points.size() + chunk_size - 1) / chunk_size)
 	
-	# Use the timer to determine which chunk to update
-	var current_chunk = int(Time.get_ticks_msec() / 16.67) % total_chunks  # 16.67ms = 1 frame at 60fps
+	var current_chunk = int(Time.get_ticks_msec() / 16.67) % total_chunks
 	var start_index = current_chunk * chunk_size
 	var end_index = min(start_index + chunk_size, scan_points.size())
 	
@@ -343,8 +393,81 @@ func update_point_colors():
 		point_data.material.albedo_color = new_color
 		point_data.material.emission = new_color
 
+func update_banana_particles(delta):
+	var current_time = Time.get_ticks_msec() / 1000.0
+	var banana_scan_progress = 0.0
+	if ui:
+		banana_scan_progress = ui.banana_scanned
+	
+	for point_data in banana_scan_points:
+		var time_alive = current_time - point_data.creation_time
+		var intensity = (sin(time_alive * 5.0) * 0.25 + 0.75) * banana_scan_progress
+		point_data.material.set_shader_parameter("glitch_intensity", intensity)
+		
+		var glitch_offset = Vector3(
+			sin(time_alive * 10.0 + point_data.creation_time) * 0.05,
+			cos(time_alive * 8.0 + point_data.creation_time) * 0.05,
+			sin(time_alive * 12.0 + point_data.creation_time) * 0.05
+		) * banana_scan_progress
+		
+		point_data.point.global_position = point_data.position + glitch_offset
+
 func reset_scan_state():
 	scanning = false
 	scan_progress = 0.0
 	is_single_scan = false
 	scan_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+
+func calculate_max_scannable_cells():
+	var terrain = get_node("../WorldEnvironment/Map/Map")
+	if terrain:
+		var aabb = terrain.get_aabb()
+		var terrain_size = aabb.size * terrain.scale
+		print("Terrain AABB: ", aabb)
+		print("Terrain scale: ", terrain.scale)
+		print("Terrain size: ", terrain_size)
+		
+		var grid_cells_x = ceil(terrain_size.x / grid_size)
+		var grid_cells_z = ceil(terrain_size.z / grid_size)
+		max_scannable_cells = int(grid_cells_x * grid_cells_z)
+		
+		max_scannable_cells = int(max_scannable_cells * 0.8)
+		
+		print("Grid size: ", grid_size)
+		print("Grid cells X: ", grid_cells_x)
+		print("Grid cells Z: ", grid_cells_z)
+		print("Raw max cells: ", grid_cells_x * grid_cells_z)
+		print("Adjusted max scannable cells (80%): ", max_scannable_cells)
+		
+		if max_scannable_cells <= 0:
+			max_scannable_cells = 100
+			print("WARNING: Invalid max_scannable_cells, using fallback value of 100")
+
+func get_grid_key(pos: Vector3) -> String:
+	var grid_x = floor(pos.x / grid_size)
+	var grid_z = floor(pos.z / grid_size)
+	return "%d,%d" % [grid_x, grid_z]
+
+func update_scan_progress(terrain_hit: bool, banana_hit: bool, hit_position: Vector3):
+	if terrain_hit:
+		var grid_key = get_grid_key(hit_position)
+		if not scanned_positions.has(grid_key):
+			scanned_positions[grid_key] = true
+			if max_scannable_cells > 0:
+				terrain_scanned = min(float(scanned_positions.size()) / float(max_scannable_cells), 0.8)
+				
+				var scaled_progress = min(terrain_scanned * 1.25, 1.0)
+				
+				if ui:
+					ui.terrain_scanned = scaled_progress
+					ui.update_progress_bars()
+					
+					if terrain_scanned >= 0.8:
+						if scan_container:
+							scan_container.queue_free()
+						get_tree().change_scene_to_file("res://win.tscn")
+	
+	if banana_hit:
+		if ui:
+			ui.banana_scanned = min(ui.banana_scanned + 0.02, 1.0)
+			ui.update_progress_bars()
