@@ -24,6 +24,8 @@ const LOSE_THRESHOLD = 0.5
 const SAVE_FILE = "user://game_data.save"
 
 func _ready():
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	
 	if current_mode_label:
 		current_mode_label.text = "CONE"
 	
@@ -43,8 +45,20 @@ func _ready():
 	update_progress_bars()
 	
 	show_tutorial()
+	print("Tutorial button path: ", tutorial_ok_button.get_path())
+	print("Tutorial button visible: ", tutorial_ok_button.visible)
+	print("Tutorial button disabled: ", tutorial_ok_button.disabled)
+	
+	if tutorial_ok_button.is_connected("pressed", _on_tutorial_ok_pressed):
+		tutorial_ok_button.pressed.disconnect(_on_tutorial_ok_pressed)
 	tutorial_ok_button.pressed.connect(_on_tutorial_ok_pressed)
-	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	
+	tutorial_ok_button.gui_input.connect(_on_button_input)
+
+func _on_button_input(event):
+	print("Button received input: ", event)
+	if event is InputEventMouseButton:
+		print("Mouse button event: ", event.button_index, " pressed: ", event.pressed)
 
 func is_first_time_playing() -> bool:
 	print("Checking save file at: ", SAVE_FILE)
@@ -70,18 +84,38 @@ func mark_tutorial_completed():
 		print("Failed to save tutorial completion")
 
 func show_tutorial():
+	print("Showing tutorial")
 	tutorial_overlay.show()
+	tutorial_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	
+	var center = tutorial_overlay.get_node("CenterContainer")
+	var panel = center.get_node("PanelContainer")
+	var vbox = panel.get_node("VBoxContainer")
+	
+	center.mouse_filter = Control.MOUSE_FILTER_PASS
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	vbox.mouse_filter = Control.MOUSE_FILTER_PASS
+	
+	tutorial_ok_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	tutorial_ok_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	tutorial_ok_button.focus_mode = Control.FOCUS_ALL
+	
+	tutorial_ok_button.show()
+	tutorial_ok_button.disabled = false
+	
 	tutorial_overlay.modulate.a = 0
 	var tween = create_tween()
 	tween.tween_property(tutorial_overlay, "modulate:a", 1.0, 0.5)
 
 func _on_tutorial_ok_pressed():
+	print("Tutorial OK button pressed!")
 	var tween = create_tween()
 	tween.tween_property(tutorial_overlay, "modulate:a", 0.0, 0.5)
 	tween.tween_callback(func():
+		print("Tutorial hide callback")
 		tutorial_overlay.hide()
-		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		mark_tutorial_completed()
+		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	)
 
 func calculate_max_scannable_cells():
@@ -180,11 +214,11 @@ func check_game_conditions():
 		var tween = create_tween()
 		tween.tween_property(self, "modulate", Color(1, 0, 0, 0), 0.5)
 		tween.tween_callback(func():
-			var err = get_tree().change_scene_to_file("res://game_over.tscn")
-			if err != OK:
-				push_error("Failed to load game over scene")
+			get_tree().change_scene_to_file("res://game_over.tscn")
 		)
 	elif banana_scanned >= LOSE_THRESHOLD:
-		pass
+		if glitch_overlay:
+			var intensity = (banana_scanned - LOSE_THRESHOLD) * 3.0
+			glitch_overlay.material.set_shader_parameter("glitch_intensity", intensity)
 	elif terrain_scanned >= WIN_THRESHOLD:
-		get_tree().call_group("game", "trigger_win")
+		get_tree().change_scene_to_file("res://win.tscn")

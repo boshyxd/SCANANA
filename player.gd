@@ -14,7 +14,7 @@ extends CharacterBody3D
 
 @export var scan_radius = 30.0
 @export var scan_angle = 30.0
-@export var rays_per_scan = 16
+@export var rays_per_scan = 8
 @export var point_size = 0.02
 @export var close_distance = 5.0
 @export var mid_distance = 15.0
@@ -27,19 +27,19 @@ enum Quality { LOW, MEDIUM, HIGH }
 
 var quality_settings = {
 	Quality.LOW: {
-		"points_per_frame": 32,
-		"fullscreen_step": 20,
-		"max_points": 20000
+		"points_per_frame": 8,
+		"fullscreen_step": 40,
+		"max_points": 5000
 	},
 	Quality.MEDIUM: {
-		"points_per_frame": 64,
-		"fullscreen_step": 10,
-		"max_points": 50000
+		"points_per_frame": 16,
+		"fullscreen_step": 20,
+		"max_points": 12000
 	},
 	Quality.HIGH: {
-		"points_per_frame": 128,
-		"fullscreen_step": 5,
-		"max_points": 100000
+		"points_per_frame": 32,
+		"fullscreen_step": 10,
+		"max_points": 25000
 	}
 }
 
@@ -62,7 +62,7 @@ var scan_progress = 0.0
 var is_single_scan = false
 var color_update_timer = 0.0
 var scan_points = []
-var base_material: StandardMaterial3D
+var base_scan_material: StandardMaterial3D
 var glitch_material: ShaderMaterial
 var banana_scan_points = []
 var max_scannable_cells = 0
@@ -70,8 +70,21 @@ var scanned_positions = {}
 var terrain_scanned = 0.0
 var terrain_progress_bar: TextureProgressBar
 
+var shared_scan_mesh: SphereMesh
+var material_pool = []
+var material_pool_index = 0
+const MATERIAL_POOL_SIZE = 50
+
+var thermal_camera: Node3D
+var beam_material: StandardMaterial3D
+var active_beams = []
+const MAX_BEAMS = 8
+
+var beam_cleanup_data = {}
+
 func _ready():
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	await get_tree().create_timer(0.1).timeout
+	
 	scan_camera.transform = camera.transform
 	rng.randomize()
 	
@@ -84,15 +97,54 @@ func _ready():
 	scan_container.name = "ScanPoints"
 	call_deferred("add_scan_container")
 	
+	var camera_scene = load("res://objects/Thermal_Camera.fbx")
+	thermal_camera = camera_scene.instantiate()
+	head.add_child(thermal_camera)
+	
+	thermal_camera.position = Vector3(0.2, -0.2, -0.3)
+	thermal_camera.rotation_degrees = Vector3(-10, 250, 0)
+	thermal_camera.scale = Vector3(0.6, 0.6, 0.6)
+	
+	beam_material = StandardMaterial3D.new()
+	beam_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beam_material.emission_enabled = true
+	beam_material.emission = Color(1.0, 0.2, 0.2, 1.0)
+	beam_material.emission_energy_multiplier = 2.0
+	beam_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	beam_material.albedo_color = Color(1.0, 0.2, 0.2, 0.3)
+	
 	glitch_material = ShaderMaterial.new()
 	glitch_material.shader = load("res://glitch_particle.gdshader")
 	glitch_material.set_shader_parameter("glitch_intensity", 0.5)
 	glitch_material.set_shader_parameter("base_color", Color(1.0, 0.2, 0.0, 1.0))
 	glitch_material.set_shader_parameter("time_offset", rng.randf() * 100.0)
 	
-	update_mode_display()
+	shared_scan_mesh = SphereMesh.new()
+	shared_scan_mesh.radius = 0.02
+	shared_scan_mesh.height = 0.04
+	shared_scan_mesh.radial_segments = 4
+	shared_scan_mesh.rings = 2
 	
-	await get_tree().create_timer(0.1).timeout
+	base_scan_material = StandardMaterial3D.new()
+	base_scan_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	base_scan_material.emission_enabled = true
+	base_scan_material.disable_ambient_light = true
+	base_scan_material.disable_receive_shadows = true
+	base_scan_material.disable_fog = true
+	
+	for i in MATERIAL_POOL_SIZE:
+		var material = StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.emission_enabled = true
+		material.disable_ambient_light = true
+		material.disable_receive_shadows = true
+		material.disable_fog = true
+		material_pool.push_back({
+			"material": material,
+			"in_use": false
+		})
+	
+	update_mode_display()
 	calculate_max_scannable_cells()
 	
 	var level = get_node("../WorldEnvironment")
@@ -185,6 +237,9 @@ func _physics_process(delta):
 	move_and_slide()
 
 func start_scan():
+	if !is_inside_tree() or !scanner or !scanner.is_inside_tree():
+		return
+		
 	scanning = true
 	scan_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	scan_progress = 0.0
@@ -197,6 +252,9 @@ func stop_scan():
 		scan_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 func perform_scan():
+	if !is_inside_tree() or !scanner or !scanner.is_inside_tree():
+		return
+		
 	var space_state = get_world_3d().direct_space_state
 	var scan_origin = scanner.global_position
 	
@@ -211,7 +269,7 @@ func perform_scan():
 			perform_fullscreen_scan(space_state, scan_origin)
 
 func perform_cone_scan(space_state, scan_origin):
-	for _i in rays_per_scan * 2:
+	for _i in rays_per_scan:
 		var phi = rng.randf_range(-scan_angle, scan_angle)
 		var theta = rng.randf_range(-scan_angle, scan_angle)
 		
@@ -223,9 +281,9 @@ func perform_cone_scan(space_state, scan_origin):
 		cast_ray(space_state, scan_origin, ray_direction)
 
 func perform_line_scan(space_state, scan_origin):
-	for i in rays_per_scan * 2:
+	for i in rays_per_scan:
 		var theta = rng.randf_range(-line_width/2.0, line_width/2.0)
-		var vertical_angle = (float(i) - float(rays_per_scan)) * (scan_angle*2.0/float(rays_per_scan))
+		var vertical_angle = (float(i) - float(rays_per_scan/2.0)) * (scan_angle*2.0/float(rays_per_scan))
 		
 		var ray_direction = Vector3(
 			sin(deg_to_rad(theta)),
@@ -235,8 +293,8 @@ func perform_line_scan(space_state, scan_origin):
 		cast_ray(space_state, scan_origin, ray_direction)
 
 func perform_wide_scan(space_state, scan_origin):
-	for i in rays_per_scan * 2:
-		var phi = (float(i) - float(rays_per_scan)) * (scan_angle*2.0/float(rays_per_scan))
+	for i in rays_per_scan:
+		var phi = (float(i) - float(rays_per_scan/2.0)) * (scan_angle*2.0/float(rays_per_scan))
 		var theta = rng.randf_range(-wide_height/2.0, wide_height/2.0)
 		
 		var ray_direction = Vector3(
@@ -248,11 +306,14 @@ func perform_wide_scan(space_state, scan_origin):
 
 func perform_fullscreen_scan(space_state, scan_origin):
 	var fov = 90.0
-	var points_per_line = 128
+	var points_per_line = 64
 	
 	var vertical_angle = lerp(-fov/2.0, fov/2.0, scan_progress)
 	
 	for i in points_per_line:
+		if i % 2 == 0:
+			continue
+			
 		var horizontal_angle = lerp(-fov/2.0, fov/2.0, float(i) / float(points_per_line - 1))
 		
 		var ray_direction = Vector3(
@@ -263,7 +324,7 @@ func perform_fullscreen_scan(space_state, scan_origin):
 		
 		ray_direction = scanner.global_transform.basis * ray_direction
 		
-		var query = PhysicsRayQueryParameters3D.create(scan_origin, scan_origin + ray_direction * scan_radius)
+		var query = PhysicsRayQueryParameters3D.create(scanner.global_position, scanner.global_position + ray_direction * scan_radius)
 		query.collide_with_areas = true
 		query.collide_with_bodies = true
 		query.collision_mask = 0xFFFFFFFF
@@ -276,14 +337,17 @@ func perform_fullscreen_scan(space_state, scan_origin):
 			create_scan_point(result.position, is_banana)
 			update_scan_progress(is_terrain, is_banana, result.position)
 	
-	scan_progress += 0.03
+	scan_progress += 0.05
 	if scan_progress >= 1.0:
 		scanning = false
 		scan_progress = 0.0
 
 func cast_ray(space_state, scan_origin, ray_direction):
+	if !is_inside_tree() or !scanner or !scanner.is_inside_tree():
+		return
+		
 	ray_direction = scanner.global_transform.basis * ray_direction
-	var query = PhysicsRayQueryParameters3D.create(scan_origin, scan_origin + ray_direction * scan_radius)
+	var query = PhysicsRayQueryParameters3D.create(scanner.global_position, scanner.global_position + ray_direction * scan_radius)
 	query.collide_with_areas = true
 	query.collide_with_bodies = true
 	query.collision_mask = 0xFFFFFFFF
@@ -305,9 +369,9 @@ func create_scan_point(pos: Vector3, is_banana: bool = false):
 			current_pool_size -= 1
 	
 	var point = MeshInstance3D.new()
-	var mesh = SphereMesh.new()
 	
 	if is_banana:
+		var mesh = SphereMesh.new()
 		mesh.radius = 0.04
 		mesh.height = 0.08
 		mesh.radial_segments = 8
@@ -316,6 +380,7 @@ func create_scan_point(pos: Vector3, is_banana: bool = false):
 		var unique_material = glitch_material.duplicate()
 		unique_material.set_shader_parameter("time_offset", rng.randf() * 100.0)
 		point.material_override = unique_material
+		point.mesh = mesh
 		
 		banana_scan_points.push_back({
 			"point": point,
@@ -324,23 +389,15 @@ func create_scan_point(pos: Vector3, is_banana: bool = false):
 			"creation_time": Time.get_ticks_msec() / 1000.0
 		})
 	else:
-		mesh.radius = 0.02
-		mesh.height = 0.04
-		mesh.radial_segments = 4
-		mesh.rings = 2
+		point.mesh = shared_scan_mesh
 		
+		var material = base_scan_material.duplicate()
 		var distance = global_position.distance_to(pos)
 		var color = get_distance_color(distance)
 		
-		var material = StandardMaterial3D.new()
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		material.albedo_color = color
-		material.emission_enabled = true
 		material.emission = color
 		material.emission_energy_multiplier = 3.0 + (1.0 - distance / far_distance) * 2.0
-		material.disable_ambient_light = true
-		material.disable_receive_shadows = true
-		material.disable_fog = true
 		point.material_override = material
 		
 		scan_points.push_back({
@@ -348,8 +405,10 @@ func create_scan_point(pos: Vector3, is_banana: bool = false):
 			"material": material,
 			"position": pos
 		})
+		
+		if scanning:
+			create_beam(pos)
 	
-	point.mesh = mesh
 	scan_container.add_child(point)
 	point.global_position = pos
 	
@@ -370,13 +429,28 @@ func get_distance_color(distance: float) -> Color:
 func _process(delta):
 	if scanning:
 		perform_scan()
+		if thermal_camera:
+			var scan_shake = sin(Time.get_ticks_msec() * 0.02) * 0.002
+			thermal_camera.position.y = -0.2 + scan_shake
+			thermal_camera.rotation_degrees.x = -10 + scan_shake * 2.0
+			
+			beam_material.emission_energy_multiplier = 2.0 + sin(Time.get_ticks_msec() * 0.01) * 0.5
+	else:
+		if thermal_camera:
+			thermal_camera.position.y = lerp(thermal_camera.position.y, -0.2, delta * 10.0)
+			thermal_camera.rotation_degrees.x = lerp(thermal_camera.rotation_degrees.x, -10.0, delta * 10.0)
+		
+		for beam in active_beams:
+			if is_instance_valid(beam):
+				beam.queue_free()
+		active_beams.clear()
+		beam_cleanup_data.clear()
 	
 	update_point_colors()
-	
 	update_banana_particles(delta)
 
 func update_point_colors():
-	if scan_points.size() == 0:
+	if !is_inside_tree() or scan_points.size() == 0:
 		return
 		
 	var chunk_size = 200
@@ -387,11 +461,18 @@ func update_point_colors():
 	var end_index = min(start_index + chunk_size, scan_points.size())
 	
 	for i in range(start_index, end_index):
+		if i >= scan_points.size():
+			break
+			
 		var point_data = scan_points[i]
+		if !is_instance_valid(point_data.point) or !point_data.point.is_inside_tree():
+			continue
+			
 		var distance = global_position.distance_to(point_data.position)
 		var new_color = get_distance_color(distance)
-		point_data.material.albedo_color = new_color
-		point_data.material.emission = new_color
+		if point_data.material.albedo_color != new_color:
+			point_data.material.albedo_color = new_color
+			point_data.material.emission = new_color
 
 func update_banana_particles(delta):
 	var current_time = Time.get_ticks_msec() / 1000.0
@@ -471,3 +552,60 @@ func update_scan_progress(terrain_hit: bool, banana_hit: bool, hit_position: Vec
 		if ui:
 			ui.banana_scanned = min(ui.banana_scanned + 0.02, 1.0)
 			ui.update_progress_bars()
+			ui.check_game_conditions()
+
+func cleanup_beam(beam_id: String):
+	if beam_cleanup_data.has(beam_id):
+		var beam = beam_cleanup_data[beam_id].beam
+		if is_instance_valid(beam) and !beam.is_queued_for_deletion():
+			beam.queue_free()
+		var index = active_beams.find(beam)
+		if index != -1:
+			active_beams.remove_at(index)
+		beam_cleanup_data.erase(beam_id)
+
+func create_beam(target_pos: Vector3):
+	if !is_inside_tree() or !scanner or !scanner.is_inside_tree() or !thermal_camera or !thermal_camera.is_inside_tree():
+		return
+		
+	while active_beams.size() >= MAX_BEAMS:
+		var old_beam = active_beams.pop_front()
+		if is_instance_valid(old_beam):
+			old_beam.queue_free()
+	
+	var beam = MeshInstance3D.new()
+	var mesh = ImmediateMesh.new()
+	
+	beam.mesh = mesh
+	beam.material_override = beam_material
+	
+	var dir_to_target = (target_pos - scanner.global_position).normalized()
+	
+	var beam_local_offset = Vector3(0, 0.1, 0)
+	var visual_start = thermal_camera.global_transform * beam_local_offset
+	
+	mesh.clear_surfaces()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	mesh.surface_add_vertex(visual_start)
+	mesh.surface_add_vertex(target_pos)
+	mesh.surface_end()
+	
+	scan_container.add_child(beam)
+	active_beams.push_back(beam)
+	
+	var beam_id = str(Time.get_ticks_msec()) + str(rng.randi())
+	
+	beam_cleanup_data[beam_id] = {
+		"beam": beam,
+		"creation_time": Time.get_ticks_msec()
+	}
+	
+	var timer = get_tree().create_timer(0.1)
+	timer.timeout.connect(func(): cleanup_beam(beam_id))
+
+func _exit_tree():
+	for beam in active_beams:
+		if is_instance_valid(beam):
+			beam.queue_free()
+	active_beams.clear()
+	beam_cleanup_data.clear()
