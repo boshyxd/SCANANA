@@ -1,5 +1,17 @@
 extends CharacterBody3D
 
+func _notification(what):
+	if OS.has_feature("web"):
+		if what == Window.NOTIFICATION_APPLICATION_FOCUS_IN:
+			print("Web window gained focus")
+			JavaScriptBridge.eval("console.log('Web window gained focus')")
+		elif what == Window.NOTIFICATION_APPLICATION_FOCUS_OUT:
+			print("Web window lost focus")
+			JavaScriptBridge.eval("console.log('Web window lost focus')")
+		
+	if what == Node.NOTIFICATION_CRASH:
+		push_error("Game crashed! Last known state: Scanning=" + str(scanning) + ", Points=" + str(scan_points.size()))
+
 @onready var camera = $Head/Camera3D
 @onready var head = $Head
 @onready var scan_viewport = $Head/SubViewport
@@ -82,21 +94,47 @@ const MAX_BEAMS = 8
 
 var beam_cleanup_data = {}
 
+var last_scan_time = 0.0
+var scan_cooldown = 0.05  # 50ms between scans
+var max_scan_duration = 10.0  # Force stop scanning after 10 seconds
+var scan_start_time = 0.0
+
 func _ready():
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("console.log('DEBUG: Starting game initialization in web mode...')")
+	print("DEBUG: Starting game initialization...")
 	await get_tree().create_timer(0.1).timeout
 	
+	print("DEBUG: Setting up scan camera...")
 	scan_camera.transform = camera.transform
+	
+	# Configure viewport for web compatibility
+	if OS.has_feature("web"):
+		scan_viewport.transparent_bg = false
+		scan_viewport.msaa_2d = Viewport.MSAA_DISABLED
+		scan_viewport.msaa_3d = Viewport.MSAA_DISABLED
+		scan_viewport.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+		scan_viewport.use_debanding = false
+		scan_viewport.use_occlusion_culling = false
+		scan_viewport.positional_shadow_atlas_size = 0
+		scan_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+		scan_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		print("DEBUG: Configured viewport for web compatibility")
+	
 	rng.randomize()
 	
+	print("DEBUG: Setting up floor parameters...")
 	floor_max_angle = deg_to_rad(60)
 	floor_snap_length = 0.3
 	floor_block_on_wall = false
 	floor_constant_speed = true
 	
+	print("DEBUG: Creating scan container...")
 	scan_container = Node3D.new()
 	scan_container.name = "ScanPoints"
 	call_deferred("add_scan_container")
 	
+	print("DEBUG: Loading thermal camera model...")
 	var camera_scene = load("res://objects/Thermal_Camera.fbx")
 	thermal_camera = camera_scene.instantiate()
 	head.add_child(thermal_camera)
@@ -104,7 +142,9 @@ func _ready():
 	thermal_camera.position = Vector3(0.2, -0.2, -0.3)
 	thermal_camera.rotation_degrees = Vector3(-10, 250, 0)
 	thermal_camera.scale = Vector3(0.6, 0.6, 0.6)
+	print("DEBUG: Thermal camera setup complete")
 	
+	print("DEBUG: Setting up materials...")
 	beam_material = StandardMaterial3D.new()
 	beam_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	beam_material.emission_enabled = true
@@ -118,7 +158,9 @@ func _ready():
 	glitch_material.set_shader_parameter("glitch_intensity", 0.5)
 	glitch_material.set_shader_parameter("base_color", Color(1.0, 0.2, 0.0, 1.0))
 	glitch_material.set_shader_parameter("time_offset", rng.randf() * 100.0)
+	print("DEBUG: Materials setup complete")
 	
+	print("DEBUG: Setting up scan mesh...")
 	shared_scan_mesh = SphereMesh.new()
 	shared_scan_mesh.radius = 0.02
 	shared_scan_mesh.height = 0.04
@@ -131,7 +173,9 @@ func _ready():
 	base_scan_material.disable_ambient_light = true
 	base_scan_material.disable_receive_shadows = true
 	base_scan_material.disable_fog = true
+	print("DEBUG: Scan mesh setup complete")
 	
+	print("DEBUG: Setting up material pool...")
 	for i in MATERIAL_POOL_SIZE:
 		var material = StandardMaterial3D.new()
 		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -143,6 +187,7 @@ func _ready():
 			"material": material,
 			"in_use": false
 		})
+	print("DEBUG: Material pool setup complete")
 	
 	update_mode_display()
 	calculate_max_scannable_cells()
@@ -150,6 +195,8 @@ func _ready():
 	var level = get_node("../WorldEnvironment")
 	if level:
 		_set_objects_visibility(level, false)
+	
+	print("DEBUG: Game initialization complete!")
 
 func add_scan_container():
 	get_tree().root.add_child(scan_container)
@@ -238,10 +285,19 @@ func _physics_process(delta):
 
 func start_scan():
 	if !is_inside_tree() or !scanner or !scanner.is_inside_tree():
+		if OS.has_feature("web"):
+			JavaScriptBridge.eval("console.log('DEBUG: Cannot start scan - invalid state')")
 		return
 		
 	scanning = true
-	scan_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	scan_start_time = Time.get_ticks_msec() / 1000.0
+	if OS.has_feature("web"):
+		scan_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+		scan_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+		RenderingServer.force_draw(true)
+		JavaScriptBridge.eval("console.log('DEBUG: Starting scan...')")
+	else:
+		scan_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	scan_progress = 0.0
 	is_single_scan = current_mode == ScanMode.FULLSCREEN
 	perform_scan()
@@ -249,27 +305,48 @@ func start_scan():
 func stop_scan():
 	if !is_single_scan:
 		scanning = false
-		scan_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		if OS.has_feature("web"):
+			scan_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+			scan_viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+			RenderingServer.force_draw(true)
+		else:
+			scan_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 func perform_scan():
 	if !is_inside_tree() or !scanner or !scanner.is_inside_tree():
 		return
 		
+	var current_time = Time.get_ticks_msec() / 1000.0
+	if current_time - scan_start_time > max_scan_duration:
+		if OS.has_feature("web"):
+			JavaScriptBridge.eval("console.log('DEBUG: Max scan duration reached, stopping scan')")
+		stop_scan()
+		return
+		
+	if current_time - last_scan_time < scan_cooldown:
+		return
+	
+	last_scan_time = current_time
+	
 	var space_state = get_world_3d().direct_space_state
 	var scan_origin = scanner.global_position
+		
+	var actual_rays = rays_per_scan
+	if OS.has_feature("web"):
+		actual_rays = rays_per_scan / 2
 	
 	match current_mode:
 		ScanMode.CONE:
-			perform_cone_scan(space_state, scan_origin)
+			perform_cone_scan(space_state, scan_origin, actual_rays)
 		ScanMode.LINE:
-			perform_line_scan(space_state, scan_origin)
+			perform_line_scan(space_state, scan_origin, actual_rays)
 		ScanMode.WIDE:
-			perform_wide_scan(space_state, scan_origin)
+			perform_wide_scan(space_state, scan_origin, actual_rays)
 		ScanMode.FULLSCREEN:
 			perform_fullscreen_scan(space_state, scan_origin)
 
-func perform_cone_scan(space_state, scan_origin):
-	for _i in rays_per_scan:
+func perform_cone_scan(space_state, scan_origin, rays: int):
+	for _i in rays:
 		var phi = rng.randf_range(-scan_angle, scan_angle)
 		var theta = rng.randf_range(-scan_angle, scan_angle)
 		
@@ -280,10 +357,10 @@ func perform_cone_scan(space_state, scan_origin):
 		).normalized()
 		cast_ray(space_state, scan_origin, ray_direction)
 
-func perform_line_scan(space_state, scan_origin):
-	for i in rays_per_scan:
+func perform_line_scan(space_state, scan_origin, rays: int):
+	for i in rays:
 		var theta = rng.randf_range(-line_width/2.0, line_width/2.0)
-		var vertical_angle = (float(i) - float(rays_per_scan/2.0)) * (scan_angle*2.0/float(rays_per_scan))
+		var vertical_angle = (float(i) - float(rays/2.0)) * (scan_angle*2.0/float(rays))
 		
 		var ray_direction = Vector3(
 			sin(deg_to_rad(theta)),
@@ -292,9 +369,9 @@ func perform_line_scan(space_state, scan_origin):
 		).normalized()
 		cast_ray(space_state, scan_origin, ray_direction)
 
-func perform_wide_scan(space_state, scan_origin):
-	for i in rays_per_scan:
-		var phi = (float(i) - float(rays_per_scan/2.0)) * (scan_angle*2.0/float(rays_per_scan))
+func perform_wide_scan(space_state, scan_origin, rays: int):
+	for i in rays:
+		var phi = (float(i) - float(rays/2.0)) * (scan_angle*2.0/float(rays))
 		var theta = rng.randf_range(-wide_height/2.0, wide_height/2.0)
 		
 		var ray_direction = Vector3(
@@ -427,7 +504,56 @@ func get_distance_color(distance: float) -> Color:
 		return Color(0.0, 0.0, 1.0, 1.0)
 
 func _process(delta):
+	if !is_inside_tree():
+		if OS.has_feature("web"):
+			JavaScriptBridge.eval("console.error('DEBUG ERROR: Player node not in tree during process')")
+		push_error("DEBUG ERROR: Player node not in tree during process")
+		return
+		
+	if OS.has_feature("web") and scanning:
+		if Engine.get_process_frames() % 30 == 0:  
+			scan_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+			RenderingServer.force_draw(true)
+			if scan_viewport.get_texture().get_width() == 0:
+				JavaScriptBridge.eval("console.log('DEBUG: Attempting to recover from WebGL context loss')")
+				stop_scan()
+				await get_tree().create_timer(0.5).timeout
+				scan_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+				RenderingServer.force_draw(true)
+	
+	if Engine.get_process_frames() % 300 == 0:
+		if OS.has_feature("web"):
+			var stats = """
+				DEBUG STATS:
+				- Active beams: %d
+				- Scan points: %d
+				- Current pool size: %d
+				- Banana points: %d
+				- FPS: %d
+				- Frame time (ms): %f
+			""" % [
+				active_beams.size(),
+				scan_points.size(),
+				current_pool_size,
+				banana_scan_points.size(),
+				Engine.get_frames_per_second(),
+				1000.0 / Engine.get_frames_per_second()
+			]
+			JavaScriptBridge.eval("console.log(`%s`)" % stats)
+		
+		print("DEBUG STATS:")
+		print("- Active beams: ", active_beams.size())
+		print("- Scan points: ", scan_points.size())
+		print("- Current pool size: ", current_pool_size)
+		print("- Banana points: ", banana_scan_points.size())
+		print("- FPS: ", Engine.get_frames_per_second())
+		print("- Frame time (ms): ", 1000.0 / Engine.get_frames_per_second())
+		
 	if scanning:
+		if !scanner or !scanner.is_inside_tree():
+			push_error("DEBUG ERROR: Scanner not valid during scanning")
+			return
+		
 		perform_scan()
 		if thermal_camera:
 			var scan_shake = sin(Time.get_ticks_msec() * 0.02) * 0.002
