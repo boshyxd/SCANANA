@@ -1,9 +1,11 @@
-[gd_scene load_steps=13 format=3 uid="uid://slnsc6ttekac"]
+[gd_scene load_steps=15 format=3 uid="uid://slnsc6ttekac"]
 
 [ext_resource type="Script" path="res://player.gd" id="1_8p4k3"]
 [ext_resource type="ArrayMesh" uid="uid://b0k1e8k2rl15d" path="res://map/MAP.obj" id="2_r6nac"]
 [ext_resource type="PackedScene" uid="uid://b4c1y6kj8h0" path="res://ui.tscn" id="2_ui"]
 [ext_resource type="ArrayMesh" uid="uid://dn5vvh8uipeeh" path="res://models/banana.obj" id="3_lf67n"]
+[ext_resource type="AudioStream" uid="uid://c0gn5em3eyx5m" path="res://sound/ScanSound.mp3" id="3_scan_sound"]
+[ext_resource type="AudioStream" uid="uid://csnipo2y0yqfs" path="res://sound/Footstep.ogg" id="4_footstep"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_4ixv3"]
 height = 1.7
@@ -48,6 +50,14 @@ shadow_enabled = true
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 40)
 collision_mask = 2
 script = ExtResource("1_8p4k3")
+
+[node name="ScanSound" type="AudioStreamPlayer" parent="Player"]
+stream = ExtResource("3_scan_sound")
+
+[node name="FootstepSound" type="AudioStreamPlayer" parent="Player"]
+stream = ExtResource("4_footstep")
+volume_db = -5.0
+pitch_scale = 0.8
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.85, 0)

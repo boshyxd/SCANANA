@@ -1,66 +1,101 @@
-[gd_scene load_steps=6 format=3 uid="uid://b8c1y6kj8h0"]
+[gd_scene load_steps=7 format=3 uid="uid://b8c1y6kj8h0"]
 
 [ext_resource type="Script" path="res://title_screen.gd" id="1_title"]
+[ext_resource type="AudioStream" uid="uid://bxfeqnaky255j" path="res://sound/TitleMusic.mp3" id="2_title_music"]
 
 [sub_resource type="Shader" id="Shader_scanlines"]
 code = "shader_type canvas_item;
 
 uniform float scan_line_opacity : hint_range(0.0, 1.0) = 0.15;
-uniform float scroll_speed = 0.5;
-uniform vec4 grid_color : source_color = vec4(1.0, 0.0, 0.0, 1.0);
+uniform vec4 data_color : source_color = vec4(1.0, 0.0, 0.0, 1.0);
+
+float random(vec2 uv) {
+    return fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+
+float get_char(vec2 uv, float seed) {
+    float r = random(floor(uv) + seed);
+    if (r > 0.5) {
+        return 1.0;
+    }
+    return 0.0;
+}
 
 void fragment() {
-    // Grid pattern
-    vec2 grid_uv = UV * 40.0;
-    grid_uv.y += TIME * scroll_speed;
+    vec2 uv = UV;
+    float binary_rain = 0.0;
     
-    float grid_x = abs(fract(grid_uv.x - 0.5) - 0.5) * 2.0;
-    float grid_y = abs(fract(grid_uv.y - 0.5) - 0.5) * 2.0;
+    vec2 grid_uv = uv * vec2(15.0, 25.0);
+    vec2 cell = fract(grid_uv);
+    vec2 cell_id = floor(grid_uv);
     
-    float grid = min(grid_x, grid_y);
-    grid = smoothstep(0.1, 0.2, grid);
+    for(float i = 0.0; i < 20.0; i++) {
+        vec2 rain_pos = cell_id;
+        rain_pos.y = fract(rain_pos.y / 25.0 - TIME * (0.3 + i * 0.01));
+        
+        float digit = get_char(rain_pos, i);
+        
+        float char_display = 0.0;
+        if (digit > 0.5) {
+            char_display = step(0.3, cell.x) * step(cell.x, 0.35) + 
+                          step(0.45, cell.x) * step(cell.x, 0.55) + 
+                          step(0.65, cell.x) * step(cell.x, 0.7);
+            char_display *= step(0.1, cell.y) * step(cell.y, 0.9);
+        } else {
+            vec2 center = cell - vec2(0.5);
+            float radius = length(center);
+            char_display = step(0.3, cell.x) * step(cell.x, 0.35) + 
+                          smoothstep(0.25, 0.2, radius) * step(radius, 0.25) + 
+                          step(0.65, cell.x) * step(cell.x, 0.7);
+            char_display *= step(0.1, cell.y) * step(cell.y, 0.9);
+        }
+        
+        float fade = 1.0 - rain_pos.y;
+        fade = fade * fade * fade;
+        
+        binary_rain += char_display * fade * 0.08;
+    }
     
-    // Add some depth effect
-    float depth = (1.0 - UV.y) * 0.5;
+    float corner_fade = 1.0 - length((UV - 0.5) * 1.8);
+    corner_fade = smoothstep(0.0, 0.6, corner_fade);
     
-    // Scan line effect
-    float scan_line = sin(UV.y * 100.0 + TIME * scroll_speed) * 0.5 + 0.5;
-    scan_line = pow(scan_line, 10.0) * scan_line_opacity;
+    float scan = sin(UV.y * 400.0 + TIME * 5.0) * 0.5 + 0.5;
+    scan = pow(scan, 10.0) * scan_line_opacity;
     
-    // Combine effects
-    vec4 grid_result = mix(grid_color, vec4(0.0), grid + depth);
-    COLOR = grid_result + vec4(1.0, 1.0, 1.0, scan_line);
+    vec4 final_color = data_color * (binary_rain * 1.0) * corner_fade;
+    final_color += vec4(scan);
+    
+    COLOR = final_color;
 }"
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_scanlines"]
 shader = SubResource("Shader_scanlines")
-shader_parameter/scan_line_opacity = 0.15
-shader_parameter/scroll_speed = 0.2
-shader_parameter/grid_color = Color(0.6, 0, 0, 0.2)
+shader_parameter/scan_line_opacity = 0.08
+shader_parameter/data_color = Color(1, 0, 0, 0.4)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button_hover"]
-bg_color = Color(0.3, 0.3, 0.3, 0.8)
+bg_color = Color(0.12, 0.12, 0.12, 0.9)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
 border_color = Color(1, 0, 0, 0.8)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button"]
-bg_color = Color(0.2, 0.2, 0.2, 0.8)
+bg_color = Color(0.08, 0.08, 0.08, 0.9)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
 border_color = Color(1, 0, 0, 0.4)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
 
 [node name="TitleScreen" type="Control"]
 layout_mode = 3
@@ -89,16 +124,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="ScanLines" type="ColorRect" parent="."]
-modulate = Color(1, 1, 1, 0.4)
-material = SubResource("ShaderMaterial_scanlines")
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-
 [node name="CenterContainer" type="CenterContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -113,7 +138,7 @@ theme_override_constants/separation = 40
 
 [node name="GameJamBanner" type="Label" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 0.5, 0, 1)
+theme_override_colors/font_color = Color(1, 0.5, 0, 0.7)
 theme_override_colors/font_outline_color = Color(0.2, 0.1, 0, 1)
 theme_override_constants/outline_size = 4
 theme_override_font_sizes/font_size = 24
@@ -123,24 +148,41 @@ horizontal_alignment = 1
 [node name="Title" type="Label" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0, 0, 1)
+theme_override_colors/font_shadow_color = Color(1, 0, 0, 0.4)
 theme_override_colors/font_outline_color = Color(0.2, 0, 0, 1)
-theme_override_constants/outline_size = 8
-theme_override_font_sizes/font_size = 96
+theme_override_constants/shadow_offset_x = 0
+theme_override_constants/shadow_offset_y = 4
+theme_override_constants/outline_size = 16
+theme_override_constants/shadow_outline_size = 4
+theme_override_font_sizes/font_size = 140
 text = "SCANANA"
 horizontal_alignment = 1
 
+[node name="TitleUnderline" type="ColorRect" parent="CenterContainer/VBoxContainer/Title"]
+custom_minimum_size = Vector2(0, 4)
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 4.0
+offset_bottom = 8.0
+grow_horizontal = 2
+grow_vertical = 0
+color = Color(1, 0, 0, 0.6)
+
 [node name="Description" type="Label" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
-theme_override_colors/font_outline_color = Color(0.2, 0.2, 0.2, 1)
-theme_override_constants/outline_size = 4
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 0.8)
+theme_override_colors/font_outline_color = Color(0.1, 0.1, 0.1, 1)
+theme_override_constants/outline_size = 8
 theme_override_font_sizes/font_size = 32
-text = "Scan everything...
-except the banana!"
+text = "SCAN_EVERYTHING.exe
+AVOID_BANANA.dll"
 horizontal_alignment = 1
 
 [node name="Spacer" type="Control" parent="CenterContainer/VBoxContainer"]
-custom_minimum_size = Vector2(0, 20)
+custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 
 [node name="ButtonsContainer" type="VBoxContainer" parent="CenterContainer/VBoxContainer"]
@@ -154,11 +196,11 @@ layout_mode = 2
 focus_mode = 0
 mouse_default_cursor_shape = 2
 theme_override_colors/font_hover_color = Color(1, 0, 0, 1)
-theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
 theme_override_font_sizes/font_size = 32
 theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/normal = SubResource("StyleBoxFlat_button")
-text = "Start Scanning"
+text = "> START_SCAN.exe"
 
 [node name="QuitButton" type="Button" parent="CenterContainer/VBoxContainer/ButtonsContainer"]
 custom_minimum_size = Vector2(0, 60)
@@ -166,8 +208,13 @@ layout_mode = 2
 focus_mode = 0
 mouse_default_cursor_shape = 2
 theme_override_colors/font_hover_color = Color(1, 0, 0, 1)
-theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
 theme_override_font_sizes/font_size = 32
 theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
 theme_override_styles/normal = SubResource("StyleBoxFlat_button")
-text = "Quit"
+text = "> EXIT.exe"
+
+[node name="TitleMusic" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("2_title_music")
+volume_db = -10.0
+autoplay = true

@@ -19,14 +19,26 @@ func _notification(what):
 @onready var scanner = $Head/Scanner
 @onready var scan_lines = $Head/Scanner/Lines
 @onready var ui = $"../UI"
+@onready var scan_sound = $ScanSound
+@onready var footstep_sound = $FootstepSound
 
-@export var speed = 7.0
+@export var speed = 2.5
 @export var fall_acceleration = 30.0
 @export var mouse_sensitivity = 0.2
 
+@export var bob_frequency = 2.0
+@export var bob_amplitude = 0.12
+@export var lean_amount = 3.0
+@export var lean_speed = 8.0  # Speed of lean transition
+var bob_time = 0.0
+var footstep_time = 0.0
+var target_lean = 0.0  # Target lean angle
+var current_lean = 0.0  # Current lean angle
+@export var footstep_interval = 0.6
+
 @export var scan_radius = 30.0
 @export var scan_angle = 30.0
-@export var rays_per_scan = 8
+@export var rays_per_scan = 16
 @export var point_size = 0.02
 @export var close_distance = 5.0
 @export var mid_distance = 15.0
@@ -39,18 +51,18 @@ enum Quality { LOW, MEDIUM, HIGH }
 
 var quality_settings = {
 	Quality.LOW: {
-		"points_per_frame": 8,
-		"fullscreen_step": 40,
+		"points_per_frame": 16,
+		"fullscreen_step": 20,
 		"max_points": 5000
 	},
 	Quality.MEDIUM: {
-		"points_per_frame": 16,
-		"fullscreen_step": 20,
+		"points_per_frame": 32,
+		"fullscreen_step": 10,
 		"max_points": 12000
 	},
 	Quality.HIGH: {
-		"points_per_frame": 32,
-		"fullscreen_step": 10,
+		"points_per_frame": 64,
+		"fullscreen_step": 5,
 		"max_points": 25000
 	}
 }
@@ -95,8 +107,8 @@ const MAX_BEAMS = 8
 var beam_cleanup_data = {}
 
 var last_scan_time = 0.0
-var scan_cooldown = 0.05  # 50ms between scans
-var max_scan_duration = 10.0  # Force stop scanning after 10 seconds
+var scan_cooldown = 0.02
+var max_scan_duration = 5.0
 var scan_start_time = 0.0
 
 func _ready():
@@ -108,7 +120,6 @@ func _ready():
 	print("DEBUG: Setting up scan camera...")
 	scan_camera.transform = camera.transform
 	
-	# Configure viewport for web compatibility
 	if OS.has_feature("web"):
 		scan_viewport.transparent_bg = false
 		scan_viewport.msaa_2d = Viewport.MSAA_DISABLED
@@ -148,10 +159,13 @@ func _ready():
 	beam_material = StandardMaterial3D.new()
 	beam_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	beam_material.emission_enabled = true
-	beam_material.emission = Color(1.0, 0.2, 0.2, 1.0)
-	beam_material.emission_energy_multiplier = 2.0
+	beam_material.emission = Color(1.0, 0.1, 0.1, 1.0)  # More saturated red
+	beam_material.emission_energy_multiplier = 8.0  # Much brighter glow
 	beam_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	beam_material.albedo_color = Color(1.0, 0.2, 0.2, 0.3)
+	beam_material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	beam_material.albedo_color = Color(1.0, 0.1, 0.1, 0.1)  # More transparent base
+	beam_material.billboard_mode = BaseMaterial3D.BILLBOARD_DISABLED
+	beam_material.cull_mode = BaseMaterial3D.CULL_DISABLED  # Show both sides
 	
 	glitch_material = ShaderMaterial.new()
 	glitch_material.shader = load("res://glitch_particle.gdshader")
@@ -266,9 +280,41 @@ func _physics_process(delta):
 	if move_direction:
 		target_velocity.x = move_direction.x * speed
 		target_velocity.z = move_direction.z * speed
+		
+		if is_on_floor():
+			# Enhanced view bobbing
+			bob_time += delta * bob_frequency * velocity.length() / speed
+			var bob_y = sin(bob_time) * bob_amplitude * velocity.length() / speed
+			var bob_x = cos(bob_time * 0.5) * bob_amplitude * 0.5 * velocity.length() / speed
+			
+			# Set target lean angle based on movement
+			target_lean = -input_dir.x * lean_amount * velocity.length() / speed
+			
+			head.position.y = 1.6 + bob_y
+			head.position.x = bob_x
+			
+			footstep_time += delta
+			if footstep_time >= footstep_interval:
+				if footstep_sound and !footstep_sound.playing:
+					footstep_sound.pitch_scale = randf_range(0.8, 1.0)
+					footstep_sound.play()
+					footstep_time = 0.0
 	else:
 		target_velocity.x = move_toward(target_velocity.x, 0, speed)
 		target_velocity.z = move_toward(target_velocity.z, 0, speed)
+		target_lean = 0.0  # Return to upright when not moving
+		
+		# Smoothly return head to center
+		head.position.y = lerp(head.position.y, 1.6, delta * 5.0)
+		head.position.x = lerp(head.position.x, 0.0, delta * 5.0)
+		
+		if footstep_sound and footstep_sound.playing:
+			footstep_sound.stop()
+		footstep_time = footstep_interval
+	
+	# Smooth lean transition
+	current_lean = lerp(current_lean, target_lean, delta * lean_speed)
+	head.rotation_degrees.z = current_lean
 	
 	if not is_on_floor():
 		target_velocity.y = target_velocity.y - (fall_acceleration * delta)
@@ -301,6 +347,12 @@ func start_scan():
 	scan_progress = 0.0
 	is_single_scan = current_mode == ScanMode.FULLSCREEN
 	perform_scan()
+	
+	if scan_sound:
+		scan_sound.stop()  # Stop any existing playback
+		scan_sound.volume_db = 0  # Reset volume in case it was faded out
+		scan_sound.pitch_scale = 1.0
+		scan_sound.play()
 
 func stop_scan():
 	if !is_single_scan:
@@ -311,6 +363,9 @@ func stop_scan():
 			RenderingServer.force_draw(true)
 		else:
 			scan_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		
+		if scan_sound and scan_sound.playing:
+			scan_sound.stop()  # Stop immediately when scan stops
 
 func perform_scan():
 	if !is_inside_tree() or !scanner or !scanner.is_inside_tree():
@@ -383,14 +438,11 @@ func perform_wide_scan(space_state, scan_origin, rays: int):
 
 func perform_fullscreen_scan(space_state, scan_origin):
 	var fov = 90.0
-	var points_per_line = 64
+	var points_per_line = 96
 	
 	var vertical_angle = lerp(-fov/2.0, fov/2.0, scan_progress)
 	
 	for i in points_per_line:
-		if i % 2 == 0:
-			continue
-			
 		var horizontal_angle = lerp(-fov/2.0, fov/2.0, float(i) / float(points_per_line - 1))
 		
 		var ray_direction = Vector3(
@@ -414,7 +466,7 @@ func perform_fullscreen_scan(space_state, scan_origin):
 			create_scan_point(result.position, is_banana)
 			update_scan_progress(is_terrain, is_banana, result.position)
 	
-	scan_progress += 0.05
+	scan_progress += 0.1
 	if scan_progress >= 1.0:
 		scanning = false
 		scan_progress = 0.0
@@ -575,6 +627,11 @@ func _process(delta):
 	update_point_colors()
 	update_banana_particles(delta)
 
+	if scanning and scan_sound and !scan_sound.playing:
+		scan_sound.volume_db = 0
+		scan_sound.pitch_scale = 1.0
+		scan_sound.play()
+
 func update_point_colors():
 	if !is_inside_tree() or scan_points.size() == 0:
 		return
@@ -676,7 +733,7 @@ func update_scan_progress(terrain_hit: bool, banana_hit: bool, hit_position: Vec
 	
 	if banana_hit:
 		if ui:
-			ui.banana_scanned = min(ui.banana_scanned + 0.02, 1.0)
+			ui.banana_scanned = min(ui.banana_scanned + 0.04, 1.0)
 			ui.update_progress_bars()
 			ui.check_game_conditions()
 
@@ -706,14 +763,74 @@ func create_beam(target_pos: Vector3):
 	beam.material_override = beam_material
 	
 	var dir_to_target = (target_pos - scanner.global_position).normalized()
+	var beam_length = scanner.global_position.distance_to(target_pos)
 	
 	var beam_local_offset = Vector3(0, 0.1, 0)
 	var visual_start = thermal_camera.global_transform * beam_local_offset
 	
 	mesh.clear_surfaces()
-	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
-	mesh.surface_add_vertex(visual_start)
-	mesh.surface_add_vertex(target_pos)
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	
+	var segments = 16  # More segments for smoother appearance
+	var core_width = 0.001  # Ultra thin core
+	var inner_glow_width = 0.004  # Inner glow
+	var outer_glow_width = 0.008  # Outer glow
+	
+	# Create three layers: core, inner glow, and outer glow
+	for layer in range(3):
+		var width = core_width
+		var alpha = 1.0
+		match layer:
+			0: # Core
+				width = core_width
+				alpha = 1.0
+			1: # Inner glow
+				width = inner_glow_width
+				alpha = 0.4
+			2: # Outer glow
+				width = outer_glow_width
+				alpha = 0.1
+		
+		for i in range(segments):
+			var t = float(i) / float(segments - 1)
+			var next_t = float(i + 1) / float(segments - 1)
+			
+			# Dynamic offset based on distance and layer
+			var offset = Vector3.ZERO
+			if layer > 0:
+				var intensity = 0.002 if layer == 1 else 0.004
+				var time_factor = Time.get_ticks_msec() * 0.01
+				offset = Vector3(
+					sin(time_factor + t * 10.0) * intensity,
+					cos(time_factor * 1.2 + t * 8.0) * intensity,
+					0
+				)
+			
+			# Progressive fade for more natural look
+			var fade = pow(1.0 - t, 0.7) # Slower initial fade
+			if layer == 0:
+				fade = 1.0 # Core stays constant
+			
+			var current_pos = visual_start.lerp(target_pos, t) + offset
+			var next_pos = visual_start.lerp(target_pos, next_t) + offset
+			
+			# Calculate beam orientation
+			var up = Vector3(0, 1, 0)
+			var right = dir_to_target.cross(up).normalized()
+			up = right.cross(dir_to_target).normalized()
+			
+			var current_width = width * fade
+			var next_width = width * (1.0 - pow(next_t, 0.7))
+			
+			# Create quad
+			mesh.surface_add_vertex(current_pos + up * current_width)
+			mesh.surface_add_vertex(current_pos - up * current_width)
+			mesh.surface_add_vertex(next_pos + up * next_width)
+			
+			mesh.surface_add_vertex(next_pos + up * next_width)
+			mesh.surface_add_vertex(current_pos - up * current_width)
+			mesh.surface_add_vertex(next_pos - up * next_width)
+	
 	mesh.surface_end()
 	
 	scan_container.add_child(beam)
@@ -726,7 +843,7 @@ func create_beam(target_pos: Vector3):
 		"creation_time": Time.get_ticks_msec()
 	}
 	
-	var timer = get_tree().create_timer(0.1)
+	var timer = get_tree().create_timer(0.03)  # Even shorter duration
 	timer.timeout.connect(func(): cleanup_beam(beam_id))
 
 func _exit_tree():

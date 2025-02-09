@@ -1,6 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://b8xkj6kj8h0"]
+[gd_scene load_steps=4 format=3 uid="uid://b8xkj6kj8h0"]
 
 [ext_resource type="Script" path="res://game_over.gd" id="1_game_over"]
+[ext_resource type="AudioStream" path="res://sound/BSOD.mp3" id="2_bsod"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button"]
 bg_color = Color(0.1, 0.1, 0.1, 0.8)
@@ -22,6 +23,12 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_game_over")
+
+[node name="BSODSound" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("2_bsod")
+volume_db = 0.0
+bus = "Sound"
+autoplay = true
 
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
